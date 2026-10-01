@@ -37,11 +37,11 @@ jobs:
         run: |
           if [ -d "AutoManagerWeb" ]; then
             cd AutoManagerWeb
-            pnpm install
+            pnpm install --no-frozen-lockfile
             pnpm build
             echo "DIST_PATH=AutoManagerWeb/dist" >> $GITHUB_ENV
           else
-            pnpm install
+            pnpm install --no-frozen-lockfile
             pnpm build
             echo "DIST_PATH=dist" >> $GITHUB_ENV
           fi
