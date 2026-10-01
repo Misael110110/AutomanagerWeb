@@ -43,15 +43,15 @@ export function SupabaseConfigModal({ visible, onClose }: SupabaseConfigModalPro
     setTestResult(null);
 
     const targetUrl = cleanUrl(url);
-    const targetKey = cleanKey(key);
+    const targetKey = cleanKey(key) || current.rawKey;
 
     if (!targetUrl.startsWith('https://') || !targetUrl.includes('.supabase.co')) {
       setErrorMsg('La URL del proyecto debe ser en formato: https://TU_ID.supabase.co');
       return;
     }
 
-    if (targetKey.length < 20) {
-      setErrorMsg('La clave anon o publicable debe tener al menos 20 caracteres.');
+    if (!targetKey || targetKey.includes('•') || targetKey.length < 20) {
+      setErrorMsg('Debes ingresar una clave anon o publicable válida (mínimo 20 caracteres).');
       return;
     }
 
@@ -98,13 +98,17 @@ export function SupabaseConfigModal({ visible, onClose }: SupabaseConfigModalPro
       return;
     }
 
-    if (!targetKey && current.isConfigured) {
-      // Keep existing key
-      saveSupabaseConfig(targetUrl, current.key);
+    if (!targetKey) {
+      if (current.isConfigured && current.rawKey && !current.rawKey.includes('•')) {
+        // Keep existing valid key, just update URL
+        saveSupabaseConfig(targetUrl);
+        return;
+      }
+      setErrorMsg('Debes ingresar la clave anon o publicable del proyecto.');
       return;
     }
 
-    if (targetKey.length < 20) {
+    if (targetKey.includes('•') || targetKey.length < 20) {
       setErrorMsg('La clave anon o publicable debe tener al menos 20 caracteres.');
       return;
     }
@@ -113,10 +117,11 @@ export function SupabaseConfigModal({ visible, onClose }: SupabaseConfigModalPro
   };
 
   const handleDisconnect = () => {
-    if (confirm('¿Desconectar Supabase y volver al modo local de demostración?')) {
+    if (confirm('¿Restablecer configuración y limpiar caché del navegador?')) {
       clearSupabaseConfig();
     }
   };
+
 
 
   return (

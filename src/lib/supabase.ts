@@ -22,7 +22,14 @@ export function sanitizeSupabaseKey(raw: string): string {
 function getInitialUrl(): string {
   if (typeof window !== 'undefined') {
     const stored = localStorage.getItem(STORAGE_URL_KEY);
-    if (stored) return sanitizeSupabaseUrl(stored);
+    if (stored) {
+      const sanitized = sanitizeSupabaseUrl(stored);
+      if (!sanitized.startsWith('https://') || !sanitized.includes('.supabase.co')) {
+        localStorage.removeItem(STORAGE_URL_KEY);
+      } else {
+        return sanitized;
+      }
+    }
   }
   return sanitizeSupabaseUrl(
     (import.meta.env.VITE_SUPABASE_URL as string | undefined) ||
@@ -35,7 +42,15 @@ function getInitialUrl(): string {
 function getInitialKey(): string {
   if (typeof window !== 'undefined') {
     const stored = localStorage.getItem(STORAGE_KEY_KEY);
-    if (stored) return sanitizeSupabaseKey(stored);
+    if (stored) {
+      const sanitized = sanitizeSupabaseKey(stored);
+      // Clean up if corrupted by masked bullets or invalid short key
+      if (sanitized.includes('•') || sanitized.length < 20) {
+        localStorage.removeItem(STORAGE_KEY_KEY);
+      } else {
+        return sanitized;
+      }
+    }
   }
   return sanitizeSupabaseKey(
     (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ||
@@ -63,19 +78,32 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
     })
   : null;
 
-export function getSupabaseConfig(): { url: string; key: string; isConfigured: boolean } {
+export function getSupabaseConfig(): {
+  url: string;
+  key: string;
+  rawKey: string;
+  isConfigured: boolean;
+} {
   return {
     url: currentUrl,
     key: currentKey ? '••••••••' + currentKey.slice(-6) : '',
+    rawKey: currentKey,
     isConfigured: isSupabaseConfigured,
   };
 }
 
-export function saveSupabaseConfig(url: string, key: string): void {
+export function saveSupabaseConfig(url: string, key?: string): void {
   const cleanUrl = sanitizeSupabaseUrl(url);
-  const cleanKey = sanitizeSupabaseKey(key);
-  localStorage.setItem(STORAGE_URL_KEY, cleanUrl);
-  localStorage.setItem(STORAGE_KEY_KEY, cleanKey);
+  if (cleanUrl.startsWith('https://') && cleanUrl.includes('.supabase.co')) {
+    localStorage.setItem(STORAGE_URL_KEY, cleanUrl);
+  }
+  if (key) {
+    const cleanKey = sanitizeSupabaseKey(key);
+    // Never save masked keys or corrupted keys
+    if (!cleanKey.includes('•') && cleanKey.length >= 20) {
+      localStorage.setItem(STORAGE_KEY_KEY, cleanKey);
+    }
+  }
   window.location.reload();
 }
 
@@ -84,4 +112,5 @@ export function clearSupabaseConfig(): void {
   localStorage.removeItem(STORAGE_KEY_KEY);
   window.location.reload();
 }
+
 
