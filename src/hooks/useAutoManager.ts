@@ -146,6 +146,8 @@ export function useAutoManager() {
   }, []);
 
   // Load cloud workshop state when businessCode is active
+  const lastCloudState = useRef<string>('');
+
   const loadCloudState = async (code: string) => {
     if (!supabase || !code) return;
     try {
@@ -156,12 +158,17 @@ export function useAutoManager() {
         .maybeSingle();
 
       if (!error && data?.state && isPrototypeState(data.state)) {
-        setVehicles(data.state.vehicles);
-        setOrders(data.state.orders);
-        setParts(data.state.parts);
-        setTools(data.state.tools);
-        setEvents(data.state.events);
-        setCloudSyncStatus('Sincronizado con la nube');
+        const cloudStateStr = JSON.stringify(data.state);
+        // Sólo actualizar si el estado remoto es diferente al local
+        if (lastCloudState.current !== cloudStateStr) {
+          lastCloudState.current = cloudStateStr;
+          setVehicles(data.state.vehicles);
+          setOrders(data.state.orders);
+          setParts(data.state.parts);
+          setTools(data.state.tools);
+          setEvents(data.state.events);
+          setCloudSyncStatus('Sincronizado con la nube');
+        }
       }
     } catch (err) {
       console.warn('Error loading workshop state from Supabase:', err);
@@ -169,30 +176,66 @@ export function useAutoManager() {
   };
 
   useEffect(() => {
-    if (businessCode) {
+    if (!businessCode) return;
+    
+    // Carga inicial
+    void loadCloudState(businessCode);
+
+    // Fallback: Polling cada 5 segundos para garantizar que sincronice "a como sea" sin necesidad de configurar nada en el dashboard de Supabase
+    const interval = setInterval(() => {
       void loadCloudState(businessCode);
+    }, 5000);
+
+    // Intento de conexión con Supabase Realtime (si está configurado en el dashboard para la tabla workshop_state)
+    let channel: any;
+    if (supabase) {
+      channel = supabase
+        .channel(`workshop_state_${businessCode}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*', // Escuchar todo (INSERT, UPDATE)
+            schema: 'public',
+            table: 'workshop_state',
+            filter: `business_code=eq.${businessCode}`,
+          },
+          () => {
+            void loadCloudState(businessCode);
+          }
+        )
+        .subscribe();
     }
+
+    return () => {
+      clearInterval(interval);
+      if (channel && supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, [businessCode]);
 
   // Auto-sync state changes to Supabase workshop_state (debounced)
-  const isFirstMount = useRef(true);
   useEffect(() => {
-    if (isFirstMount.current) {
-      isFirstMount.current = false;
+    if (!supabase || !businessCode) return;
+
+    const snapshot: PrototypeState = { vehicles, orders, parts, tools, events };
+    const currentStateStr = JSON.stringify(snapshot);
+
+    // Evitar loop infinito: no guardar si el estado actual es idéntico al último que vino de la nube
+    if (currentStateStr === lastCloudState.current) {
       return;
     }
-    if (!supabase || !businessCode) return;
 
     setCloudSyncStatus('Guardando en la nube…');
     const timer = setTimeout(async () => {
       try {
-        const snapshot: PrototypeState = { vehicles, orders, parts, tools, events };
         const { error } = await supabase.from('workshop_state').upsert({
           business_code: businessCode,
           state: snapshot,
           updated_at: new Date().toISOString(),
         });
         if (!error) {
+          lastCloudState.current = currentStateStr; // Actualizar nuestro marcador después de guardar con éxito
           setCloudSyncStatus('Guardado en la nube');
         } else {
           setCloudSyncStatus('');
