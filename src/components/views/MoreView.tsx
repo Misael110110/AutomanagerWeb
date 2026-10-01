@@ -1,6 +1,7 @@
 import {
   ChevronRight,
   ClipboardList,
+  Database,
   History,
   LogOut,
   RotateCcw,
@@ -14,6 +15,7 @@ interface MoreViewProps {
   lowStock: Part[];
   cloudSyncStatus: string;
   onOpen: (view: MoreViewType) => void;
+  onOpenSupabaseConfig: () => void;
   onLogout: () => void;
   onResetData: () => void;
 }
@@ -72,6 +74,29 @@ export function MoreView({
           <span>Estado de sincronización: {cloudSyncStatus}</span>
         </div>
       )}
+
+      {/* Supabase Cloud Connection Card */}
+      <div
+        onClick={onOpenSupabaseConfig}
+        className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-blue-500/10 border border-emerald-200/80 hover:border-emerald-400 transition-all cursor-pointer flex items-center justify-between gap-4 shadow-xs"
+      >
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs shrink-0">
+            <Database className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-extrabold text-sm sm:text-base text-[#0B2545]">
+              Servidor y Base de Datos (Supabase)
+            </h3>
+            <p className="text-xs text-[#697586]">
+              {cloudSyncStatus
+                ? 'Conectado a la nube · Clic para ver o cambiar credenciales'
+                : 'Conectar base de datos en la nube para sincronizar entre varios dispositivos'}
+            </p>
+          </div>
+        </div>
+        <ChevronRight className="w-5 h-5 text-emerald-700 shrink-0" />
+      </div>
 
       {/* Menu Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">

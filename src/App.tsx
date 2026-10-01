@@ -5,6 +5,7 @@ import { AuthModal } from './components/modals/AuthModal';
 import { NewOrderModal } from './components/modals/NewOrderModal';
 import { NewVehicleModal } from './components/modals/NewVehicleModal';
 import { OrderDetailModal } from './components/modals/OrderDetailModal';
+import { SupabaseConfigModal } from './components/modals/SupabaseConfigModal';
 import { VehicleDetailModal } from './components/modals/VehicleDetailModal';
 import { HistoryView } from './components/views/HistoryView';
 import { HomeView } from './components/views/HomeView';
@@ -57,6 +58,7 @@ export default function App() {
   // Modals
   const [newVehicleOpen, setNewVehicleOpen] = useState(false);
   const [newOrderOpen, setNewOrderOpen] = useState(false);
+  const [supabaseConfigOpen, setSupabaseConfigOpen] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
 
@@ -95,6 +97,7 @@ export default function App() {
           onRegisterWorkerLocal={registerWorkerLocal}
           onCloudSignIn={cloudSignIn}
           onCloudSignUp={cloudSignUp}
+          onOpenSupabaseConfig={() => setSupabaseConfigOpen(true)}
         />
       )}
 
@@ -165,6 +168,7 @@ export default function App() {
                 lowStock={lowStock}
                 cloudSyncStatus={cloudSyncStatus}
                 onOpen={setMoreView}
+                onOpenSupabaseConfig={() => setSupabaseConfigOpen(true)}
                 onLogout={logout}
                 onResetData={resetToSeedData}
               />
@@ -221,6 +225,11 @@ export default function App() {
         orders={selectedVehicleOrders}
         onClose={() => setSelectedVehicleId(null)}
         onSelectOrder={setSelectedOrderId}
+      />
+
+      <SupabaseConfigModal
+        visible={supabaseConfigOpen}
+        onClose={() => setSupabaseConfigOpen(false)}
       />
     </div>
   );

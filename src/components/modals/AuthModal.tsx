@@ -10,6 +10,7 @@ interface AuthModalProps {
   onRegisterWorkerLocal: (name: string, pin: string, code: string, role: Role) => LocalProfile | null;
   onCloudSignIn?: (email: string, pass: string) => Promise<{ error?: string }>;
   onCloudSignUp?: (name: string, email: string, pass: string) => Promise<{ error?: string; message?: string }>;
+  onOpenSupabaseConfig?: () => void;
 }
 
 type LocalAuthMode = 'LOGIN' | 'BUSINESS' | 'WORKER';
@@ -22,6 +23,7 @@ export function AuthModal({
   onRegisterWorkerLocal,
   onCloudSignIn,
   onCloudSignUp,
+  onOpenSupabaseConfig,
 }: AuthModalProps) {
   // Local state
   const [localMode, setLocalMode] = useState<LocalAuthMode>('LOGIN');
@@ -304,6 +306,15 @@ export function AuthModal({
                     >
                       Soy trabajador: unirme con código
                     </button>
+                    {onOpenSupabaseConfig && (
+                      <button
+                        type="button"
+                        onClick={onOpenSupabaseConfig}
+                        className="mt-2 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-200 transition-colors cursor-pointer"
+                      >
+                        ⚙️ Configurar Servidor Supabase
+                      </button>
+                    )}
                   </div>
                 </form>
               ) : localMode === 'BUSINESS' ? (
