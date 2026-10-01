@@ -15,49 +15,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install pnpm
+      - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: 11.24.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'pnpm'
-          cache-dependency-path: '**/pnpm-lock.yaml'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build Web Application
-        run: |
-          if [ -d "AutoManagerWeb" ]; then
-            cd AutoManagerWeb
-            pnpm install --no-frozen-lockfile
-            pnpm build
-            echo "DIST_PATH=AutoManagerWeb/dist" >> $GITHUB_ENV
-          else
-            pnpm install --no-frozen-lockfile
-            pnpm build
-            echo "DIST_PATH=dist" >> $GITHUB_ENV
-          fi
+        run: npx vite build
 
-      - name: Upload Pages Artifact
+      - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ${{ env.DIST_PATH }}
+          path: ./dist
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
