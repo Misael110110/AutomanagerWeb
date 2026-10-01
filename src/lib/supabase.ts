@@ -3,29 +3,48 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 const STORAGE_URL_KEY = 'automanager.supabase_url';
 const STORAGE_KEY_KEY = 'automanager.supabase_key';
 
+export function sanitizeSupabaseUrl(raw: string): string {
+  let val = raw.trim();
+  if (val.includes('=')) {
+    val = val.split('=').pop() || '';
+  }
+  return val.replace(/^["']|["']$/g, '').trim();
+}
+
+export function sanitizeSupabaseKey(raw: string): string {
+  let val = raw.trim();
+  if (val.includes('=')) {
+    val = val.split('=').pop() || '';
+  }
+  return val.replace(/^["']|["']$/g, '').trim();
+}
+
 function getInitialUrl(): string {
   if (typeof window !== 'undefined') {
     const stored = localStorage.getItem(STORAGE_URL_KEY);
-    if (stored) return stored.trim();
+    if (stored) return sanitizeSupabaseUrl(stored);
   }
-  return (
+  return sanitizeSupabaseUrl(
     (import.meta.env.VITE_SUPABASE_URL as string | undefined) ||
+    (import.meta.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined) ||
     (import.meta.env.EXPO_PUBLIC_SUPABASE_URL as string | undefined) ||
     ''
-  ).trim();
+  );
 }
 
 function getInitialKey(): string {
   if (typeof window !== 'undefined') {
     const stored = localStorage.getItem(STORAGE_KEY_KEY);
-    if (stored) return stored.trim();
+    if (stored) return sanitizeSupabaseKey(stored);
   }
-  return (
+  return sanitizeSupabaseKey(
     (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ||
     (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ||
+    (import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY as string | undefined) ||
+    (import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string | undefined) ||
     (import.meta.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY as string | undefined) ||
     ''
-  ).trim();
+  );
 }
 
 const currentUrl = getInitialUrl();
@@ -53,8 +72,10 @@ export function getSupabaseConfig(): { url: string; key: string; isConfigured: b
 }
 
 export function saveSupabaseConfig(url: string, key: string): void {
-  localStorage.setItem(STORAGE_URL_KEY, url.trim());
-  localStorage.setItem(STORAGE_KEY_KEY, key.trim());
+  const cleanUrl = sanitizeSupabaseUrl(url);
+  const cleanKey = sanitizeSupabaseKey(key);
+  localStorage.setItem(STORAGE_URL_KEY, cleanUrl);
+  localStorage.setItem(STORAGE_KEY_KEY, cleanKey);
   window.location.reload();
 }
 
@@ -63,3 +84,4 @@ export function clearSupabaseConfig(): void {
   localStorage.removeItem(STORAGE_KEY_KEY);
   window.location.reload();
 }
+

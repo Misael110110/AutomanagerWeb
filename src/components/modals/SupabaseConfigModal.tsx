@@ -23,24 +23,93 @@ export function SupabaseConfigModal({ visible, onClose }: SupabaseConfigModalPro
 
   if (!visible) return null;
 
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; msg: string } | null>(null);
+
+  const cleanUrl = (val: string) => {
+    let u = val.trim();
+    if (u.includes('=')) u = u.split('=').pop() || '';
+    return u.replace(/^["']|["']$/g, '').trim();
+  };
+
+  const cleanKey = (val: string) => {
+    let k = val.trim();
+    if (k.includes('=')) k = k.split('=').pop() || '';
+    return k.replace(/^["']|["']$/g, '').trim();
+  };
+
+  const handleTest = async () => {
     setErrorMsg(null);
+    setTestResult(null);
 
-    const cleanUrl = url.trim();
-    const cleanKey = key.trim();
+    const targetUrl = cleanUrl(url);
+    const targetKey = cleanKey(key);
 
-    if (!cleanUrl.startsWith('https://') || !cleanUrl.includes('.supabase.co')) {
+    if (!targetUrl.startsWith('https://') || !targetUrl.includes('.supabase.co')) {
       setErrorMsg('La URL del proyecto debe ser en formato: https://TU_ID.supabase.co');
       return;
     }
 
-    if (cleanKey.length < 20) {
-      setErrorMsg('La clave anon/publicable debe ser válida (suele empezar con "eyJ...").');
+    if (targetKey.length < 20) {
+      setErrorMsg('La clave anon o publicable debe tener al menos 20 caracteres.');
       return;
     }
 
-    saveSupabaseConfig(cleanUrl, cleanKey);
+    setIsTesting(true);
+    try {
+      const res = await fetch(`${targetUrl}/rest/v1/businesses?select=*&limit=1`, {
+        headers: {
+          apikey: targetKey,
+          Authorization: `Bearer ${targetKey}`,
+        },
+      });
+
+      if (res.ok) {
+        setTestResult({
+          success: true,
+          msg: '¡Conexión exitosa! Las credenciales y la base de datos responden correctamente.',
+        });
+      } else {
+        const errorBody = await res.json().catch(() => ({ message: res.statusText }));
+        setTestResult({
+          success: false,
+          msg: `Error (${res.status}): ${errorBody.message || 'Credenciales inválidas'}`,
+        });
+      }
+    } catch (err: unknown) {
+      setTestResult({
+        success: false,
+        msg: `Error de red: ${err instanceof Error ? err.message : 'No se pudo conectar con el servidor'}`,
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    const targetUrl = cleanUrl(url);
+    const targetKey = cleanKey(key);
+
+    if (!targetUrl.startsWith('https://') || !targetUrl.includes('.supabase.co')) {
+      setErrorMsg('La URL del proyecto debe ser en formato: https://TU_ID.supabase.co');
+      return;
+    }
+
+    if (!targetKey && current.isConfigured) {
+      // Keep existing key
+      saveSupabaseConfig(targetUrl, current.key);
+      return;
+    }
+
+    if (targetKey.length < 20) {
+      setErrorMsg('La clave anon o publicable debe tener al menos 20 caracteres.');
+      return;
+    }
+
+    saveSupabaseConfig(targetUrl, targetKey);
   };
 
   const handleDisconnect = () => {
@@ -48,6 +117,7 @@ export function SupabaseConfigModal({ visible, onClose }: SupabaseConfigModalPro
       clearSupabaseConfig();
     }
   };
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
@@ -137,6 +207,18 @@ export function SupabaseConfigModal({ visible, onClose }: SupabaseConfigModalPro
             </p>
           </div>
 
+          {testResult && (
+            <div
+              className={`p-3 rounded-xl border text-xs font-bold ${
+                testResult.success
+                  ? 'bg-green-50 border-green-200 text-green-800'
+                  : 'bg-red-50 border-red-200 text-red-800'
+              }`}
+            >
+              {testResult.msg}
+            </div>
+          )}
+
           <div className="p-3.5 rounded-xl bg-[#F6F8FB] border border-[#E5EAF0] text-xs text-[#536174] space-y-1">
             <div className="flex items-center justify-between">
               <span className="font-bold text-[#192235]">Base de datos:</span>
@@ -156,14 +238,23 @@ export function SupabaseConfigModal({ visible, onClose }: SupabaseConfigModalPro
           </div>
 
           <div className="pt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#E5EAF0]">
-            <div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleTest}
+                disabled={isTesting}
+                className="px-3 py-2 rounded-xl text-xs font-bold text-[#1264A3] bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isTesting ? 'Probando...' : '🔍 Probar Conexión'}
+              </button>
+
               {current.isConfigured && (
                 <button
                   type="button"
                   onClick={handleDisconnect}
-                  className="text-xs font-bold text-red-600 hover:underline cursor-pointer"
+                  className="text-xs font-bold text-red-600 hover:underline cursor-pointer ml-1"
                 >
-                  Desconectar y usar local
+                  Desconectar
                 </button>
               )}
             </div>
@@ -184,6 +275,7 @@ export function SupabaseConfigModal({ visible, onClose }: SupabaseConfigModalPro
               </button>
             </div>
           </div>
+
         </form>
       </div>
     </div>
