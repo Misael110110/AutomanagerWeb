@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Session } from '@supabase/supabase-js';
+
 import {
   businessesSeed,
   eventsSeed,
@@ -54,13 +54,8 @@ export function useAutoManager() {
     () => initialLocalProfile?.businessCode ?? 'ANGELES-4K7P'
   );
 
-  // Cloud auth & sync states
-  const [cloudSession, setCloudSession] = useState<Session | null>(null);
-  const [cloudLoading, setCloudLoading] = useState(isSupabaseConfigured);
-  const [cloudBusinessId, setCloudBusinessId] = useState<string | null>(null);
-  const [cloudStateReady, setCloudStateReady] = useState(false);
+  // Cloud sync status
   const [cloudSyncStatus, setCloudSyncStatus] = useState<string>('');
-  const cloudSaveError = useRef<string | null>(null);
 
   // --- Operational State ---
   const [vehicles, setVehicles] = useState<Vehicle[]>(() =>
@@ -88,34 +83,127 @@ export function useAutoManager() {
     saveLocal(LOCAL_BUSINESSES_KEY, businesses);
   }, [businesses]);
 
-  // Persist operational state to localStorage when in local mode
+  // Always persist operational state to localStorage (offline-first)
   useEffect(() => {
-    if (!cloudSession) {
-      saveLocal('automanager.vehicles.v1', vehicles);
-      saveLocal('automanager.orders.v1', orders);
-      saveLocal('automanager.parts.v1', parts);
-      saveLocal('automanager.tools.v1', tools);
-      saveLocal('automanager.events.v1', events);
-    }
-  }, [vehicles, orders, parts, tools, events, cloudSession]);
+    saveLocal('automanager.vehicles.v1', vehicles);
+    saveLocal('automanager.orders.v1', orders);
+    saveLocal('automanager.parts.v1', parts);
+    saveLocal('automanager.tools.v1', tools);
+    saveLocal('automanager.events.v1', events);
+  }, [vehicles, orders, parts, tools, events]);
 
-  // Supabase Auth listener
+  // Initial load of businesses and profiles from Supabase (without email/auth)
   useEffect(() => {
     if (!supabase) return;
 
-    supabase.auth.getSession().then(({ data }) => {
-      setCloudSession(data.session);
-      setCloudLoading(false);
-    });
+    let isMounted = true;
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setCloudSession(session);
-    });
+    // Load businesses from Supabase
+    supabase
+      .from('workshop_businesses')
+      .select('code, name, manager_name')
+      .then(({ data, error }) => {
+        if (!isMounted || error || !data || data.length === 0) return;
+        setBusinesses((current) => {
+          const map = new Map(current.map((b) => [b.code, b]));
+          data.forEach((b: { code: string; name: string; manager_name: string }) => {
+            map.set(b.code, {
+              code: b.code,
+              name: b.name,
+              managerName: b.manager_name,
+            });
+          });
+          return Array.from(map.values());
+        });
+      });
+
+    // Load profiles from Supabase
+    supabase
+      .from('workshop_profiles')
+      .select('id, business_code, name, pin, role')
+      .then(({ data, error }) => {
+        if (!isMounted || error || !data || data.length === 0) return;
+        setProfiles((current) => {
+          const map = new Map(current.map((p) => [p.id, p]));
+          data.forEach(
+            (p: { id: string; business_code: string; name: string; pin: string; role: string }) => {
+              map.set(p.id, {
+                id: p.id,
+                name: p.name,
+                pin: p.pin,
+                role: p.role as Role,
+                businessCode: p.business_code,
+              });
+            }
+          );
+          return Array.from(map.values());
+        });
+      });
 
     return () => {
-      listener.subscription.unsubscribe();
+      isMounted = false;
     };
   }, []);
+
+  // Load cloud workshop state when businessCode is active
+  const loadCloudState = async (code: string) => {
+    if (!supabase || !code) return;
+    try {
+      const { data, error } = await supabase
+        .from('workshop_state')
+        .select('state')
+        .eq('business_code', code)
+        .maybeSingle();
+
+      if (!error && data?.state && isPrototypeState(data.state)) {
+        setVehicles(data.state.vehicles);
+        setOrders(data.state.orders);
+        setParts(data.state.parts);
+        setTools(data.state.tools);
+        setEvents(data.state.events);
+        setCloudSyncStatus('Sincronizado con la nube');
+      }
+    } catch (err) {
+      console.warn('Error loading workshop state from Supabase:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (businessCode) {
+      void loadCloudState(businessCode);
+    }
+  }, [businessCode]);
+
+  // Auto-sync state changes to Supabase workshop_state (debounced)
+  const isFirstMount = useRef(true);
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    if (!supabase || !businessCode) return;
+
+    setCloudSyncStatus('Guardando en la nube…');
+    const timer = setTimeout(async () => {
+      try {
+        const snapshot: PrototypeState = { vehicles, orders, parts, tools, events };
+        const { error } = await supabase.from('workshop_state').upsert({
+          business_code: businessCode,
+          state: snapshot,
+          updated_at: new Date().toISOString(),
+        });
+        if (!error) {
+          setCloudSyncStatus('Guardado en la nube');
+        } else {
+          setCloudSyncStatus('');
+        }
+      } catch {
+        setCloudSyncStatus('');
+      }
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [vehicles, orders, parts, tools, events, businessCode]);
 
   // Log an event
   const addEvent = (title: string, detail: string, kind: Event['kind']) => {
@@ -131,139 +219,6 @@ export function useAutoManager() {
     ]);
   };
 
-  // Load cloud workspace when session is present
-  const loadCloudWorkspace = async (session: Session) => {
-    if (!supabase) return;
-    setCloudLoading(true);
-    setCloudStateReady(false);
-
-    const fallbackName = String(
-      session.user.user_metadata?.full_name ?? session.user.email?.split('@')[0] ?? 'Usuario'
-    );
-
-    try {
-      const [{ data: profile }, { data: membership, error }] = await Promise.all([
-        supabase.from('profiles').select('full_name').eq('id', session.user.id).maybeSingle(),
-        supabase
-          .from('memberships')
-          .select('business_id, role, businesses(name, join_code)')
-          .eq('user_id', session.user.id)
-          .eq('status', 'ACTIVO')
-          .limit(1)
-          .maybeSingle(),
-      ]);
-
-      setUserName(profile?.full_name ?? fallbackName);
-
-      if (error) {
-        console.error('Error opening workspace:', error.message);
-      }
-
-      type MembershipData = {
-        business_id: string;
-        role: Role;
-        businesses: { name: string; join_code: string } | null;
-      };
-
-      const workspace = membership as unknown as MembershipData | null;
-
-      if (workspace?.businesses) {
-        setRole(workspace.role);
-        setBusinessName(workspace.businesses.name);
-        setBusinessCode(workspace.businesses.join_code);
-        setCloudBusinessId(workspace.business_id);
-
-        // Try to load cached local workspace
-        const cache = loadLocal<Partial<PrototypeState> | undefined>(
-          workspaceCacheKey(workspace.business_id),
-          undefined
-        );
-        if (isPrototypeState(cache)) {
-          setOrders(cache.orders);
-          setVehicles(cache.vehicles);
-          setParts(cache.parts);
-          setTools(cache.tools);
-          setEvents(cache.events);
-          setCloudSyncStatus('Caché local; sincronizando nube…');
-        }
-
-        // Fetch from Supabase prototype_state table
-        const { data: stored, error: stateError } = await supabase
-          .from('prototype_state')
-          .select('state')
-          .eq('business_id', workspace.business_id)
-          .maybeSingle();
-
-        if (stateError && stateError.code !== 'PGRST116') {
-          console.warn('Error reading saved state:', stateError.message);
-        }
-
-        const saved = stored?.state as Partial<PrototypeState> | undefined;
-        if (isPrototypeState(saved)) {
-          setOrders(saved.orders);
-          setVehicles(saved.vehicles);
-          setParts(saved.parts);
-          setTools(saved.tools);
-          setEvents(saved.events);
-          setCloudSyncStatus('Trabajo recuperado de la nube');
-        }
-        setCloudStateReady(true);
-      } else {
-        // Do not kick user out if they are logged in locally
-        setCloudBusinessId(null);
-      }
-
-    } catch (e) {
-      console.error('Exception loading workspace:', e);
-    } finally {
-      setCloudLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (cloudSession) {
-      void loadCloudWorkspace(cloudSession);
-    }
-  }, [cloudSession]);
-
-  // Cloud sync effect
-  useEffect(() => {
-    if (!supabase || !cloudSession || !cloudBusinessId || !cloudStateReady) return;
-
-    const client = supabase;
-    const snapshot: PrototypeState = { vehicles, orders, parts, tools, events };
-
-    saveLocal(workspaceCacheKey(cloudBusinessId), snapshot);
-    setCloudSyncStatus('Guardando…');
-
-    const timeout = setTimeout(() => {
-      void (async () => {
-        try {
-          const { error } = await client.from('prototype_state').upsert(
-            {
-              business_id: cloudBusinessId,
-              state: snapshot,
-              updated_by: cloudSession.user.id,
-            },
-            { onConflict: 'business_id' }
-          );
-
-          if (error && cloudSaveError.current !== error.message) {
-            cloudSaveError.current = error.message;
-            setCloudSyncStatus('Error al guardar en nube');
-          } else if (!error) {
-            cloudSaveError.current = null;
-            setCloudSyncStatus('Guardado en la nube');
-          }
-        } catch (err) {
-          console.error('Error syncing:', err);
-          setCloudSyncStatus('Sin conexión a la nube');
-        }
-      })();
-    }, 500);
-
-    return () => clearTimeout(timeout);
-  }, [cloudBusinessId, cloudSession, cloudStateReady, events, orders, parts, tools, vehicles]);
 
   // --- Operational Actions ---
 
@@ -462,6 +417,8 @@ export function useAutoManager() {
 
   // --- Auth Handlers ---
 
+  // --- Auth Handlers ---
+
   const loginLocal = (profile: LocalProfile) => {
     const business = businesses.find((item) => item.code === profile.businessCode);
     setRole(profile.role);
@@ -469,6 +426,7 @@ export function useAutoManager() {
     setBusinessName(business?.name ?? 'Negocio local');
     setBusinessCode(profile.businessCode);
     saveLocal(LOCAL_ACTIVE_USER_KEY, profile);
+    void loadCloudState(profile.businessCode);
   };
 
   const registerBusinessLocal = (
@@ -502,6 +460,27 @@ export function useAutoManager() {
     ]);
     setProfiles((current) => [...current, profile]);
     loginLocal(profile);
+
+    // Persist to Supabase workshop tables
+    if (supabase) {
+      void supabase.from('workshop_businesses').insert({
+        code,
+        name: normalized,
+        manager_name: managerName.trim(),
+      });
+      void supabase.from('workshop_profiles').insert({
+        id: profile.id,
+        business_code: code,
+        name: profile.name,
+        pin: profile.pin,
+        role: profile.role,
+      });
+      void supabase.from('workshop_state').insert({
+        business_code: code,
+        state: { vehicles, orders, parts, tools, events },
+      });
+    }
+
     return profile;
   };
 
@@ -530,79 +509,31 @@ export function useAutoManager() {
 
     setProfiles((current) => [...current, profile]);
     loginLocal(profile);
+
+    // Persist to Supabase workshop_profiles
+    if (supabase) {
+      void supabase.from('workshop_profiles').insert({
+        id: profile.id,
+        business_code: normalizedCode,
+        name: profile.name,
+        pin: profile.pin,
+        role: profile.role,
+      });
+    }
+
     return profile;
   };
 
-  const cloudSignIn = async (email: string, pass: string): Promise<{ error?: string }> => {
-    if (!supabase) return { error: 'Supabase no está configurado.' };
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password: pass,
-    });
-    if (error) return { error: error.message };
-    if (data.session) await loadCloudWorkspace(data.session);
-    return {};
-  };
+  const cloudSignIn = async (): Promise<{ error?: string }> => ({});
+  const cloudSignUp = async (): Promise<{ error?: string; message?: string }> => ({});
+  const cloudCreateBusiness = async (): Promise<{ error?: string }> => ({});
+  const cloudJoinBusiness = async (): Promise<{ error?: string }> => ({});
 
-  const cloudSignUp = async (
-    name: string,
-    email: string,
-    pass: string
-  ): Promise<{ error?: string; message?: string }> => {
-    if (!supabase) return { error: 'Supabase no está configurado.' };
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password: pass,
-      options: { data: { full_name: name.trim() } },
-    });
-    if (error) return { error: error.message };
-    if (!data.session) {
-      return {
-        message: 'Revisa tu correo para confirmar la cuenta antes de iniciar sesión.',
-      };
-    }
-    await loadCloudWorkspace(data.session);
-    return {};
-  };
-
-  const cloudCreateBusiness = async (name: string): Promise<{ error?: string }> => {
-    if (!supabase || !cloudSession) return { error: 'Sesión no iniciada.' };
-    const { data, error } = await supabase
-      .from('businesses')
-      .insert({ name: name.trim(), owner_id: cloudSession.user.id, join_code: '' })
-      .select('id, name, join_code')
-      .single();
-
-    if (error) return { error: error.message };
-    setBusinessName(data.name);
-    setBusinessCode(data.join_code);
-    setCloudBusinessId(data.id);
-    setCloudStateReady(true);
-    setRole('ENCARGADO');
-    return {};
-  };
-
-  const cloudJoinBusiness = async (code: string): Promise<{ error?: string }> => {
-    if (!supabase || !cloudSession) return { error: 'Sesión no iniciada.' };
-    const { error } = await supabase.rpc('join_business_by_code', {
-      code: code.trim().toUpperCase(),
-      requested_role: 'MECANICO',
-    });
-    if (error) return { error: error.message };
-    await loadCloudWorkspace(cloudSession);
-    return {};
-  };
-
-  const logout = async () => {
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
+  const logout = () => {
     setRole(null);
-    setCloudSession(null);
-    setCloudBusinessId(null);
-    setCloudStateReady(false);
     saveLocal(LOCAL_ACTIVE_USER_KEY, null);
   };
+
 
   const resetToSeedData = () => {
     setVehicles(vehiclesSeed);
@@ -645,9 +576,11 @@ export function useAutoManager() {
     profiles,
     businesses,
     isCloud: isSupabaseConfigured,
-    cloudSession,
-    cloudLoading,
+    cloudSession: null,
+    cloudLoading: false,
     cloudSyncStatus,
+
+
 
     // Data
     vehicles,
