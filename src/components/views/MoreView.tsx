@@ -24,6 +24,7 @@ export function MoreView({
   lowStock,
   cloudSyncStatus,
   onOpen,
+  onOpenSupabaseConfig,
   onLogout,
   onResetData,
 }: MoreViewProps) {
