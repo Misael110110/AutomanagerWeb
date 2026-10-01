@@ -209,9 +209,10 @@ export function useAutoManager() {
         }
         setCloudStateReady(true);
       } else {
-        setRole(null);
+        // Do not kick user out if they are logged in locally
         setCloudBusinessId(null);
       }
+
     } catch (e) {
       console.error('Exception loading workspace:', e);
     } finally {

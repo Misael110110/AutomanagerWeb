@@ -90,16 +90,14 @@ export default function App() {
       {/* Login Modal when unauthenticated */}
       {!role && (
         <AuthModal
-          isCloud={isCloud}
           profiles={profiles}
           onLoginLocal={loginLocal}
           onRegisterBusinessLocal={registerBusinessLocal}
           onRegisterWorkerLocal={registerWorkerLocal}
-          onCloudSignIn={cloudSignIn}
-          onCloudSignUp={cloudSignUp}
           onOpenSupabaseConfig={() => setSupabaseConfigOpen(true)}
         />
       )}
+
 
       {/* Header */}
       <Header
